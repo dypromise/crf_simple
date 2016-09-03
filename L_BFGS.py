@@ -92,4 +92,4 @@ def lbfgs(x, corps,
         iter += 1
         x = x_new
         print 'iterations：%d, func_value：%f' % (iter, funcvalue)
-    return x, fun(x, corps, featureTS, words2tagids)  # ,k#分别是最优点坐标，最优值，迭代次数
+    return x, fun(x, corps, featureTS, words2tagids)  
