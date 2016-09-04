@@ -6,6 +6,11 @@ import Logspace
 logspace = Logspace.Logspace()
 
 
+def sentence2corp(sentence):
+    sentence = "<S> " + sentence.strip() + " <S>"
+    return sentence.strip().split(' ')
+
+
 def read_corps(corpsfile='test.txt'):
     """
 
@@ -45,7 +50,7 @@ def read_corps(corpsfile='test.txt'):
                 words.append("<S>")  # add the end token.
                 tags.append(0)  # add the tag index of end token.
                 if np.shape(words)[0] > 2:  # if not empty sentence
-                    corps.append((words, tags))
+                    corps.append((words, tags))  # corps is a tuple!
 
                 # Reinitialize the lists in order to process the next sentence.
                 onesentence = []
@@ -81,7 +86,7 @@ def words2tagidfromfeatureS(featureS):
 
     Statistics taglist of every word.
     :param featureS:
-    :return:dict : { "word1":[state1,state2,..] , ..}
+    :return: it return a dict : { "word1":[state1,state2,..] , ..}
     """
 
     words2tagids = {}
@@ -96,14 +101,18 @@ def words2tagidfromfeatureS(featureS):
     return words2tagids
 
 
-def getlog_Phi_of_corp(weights, corps_i, featureTS, words2tagids):
+def getlogfactor_Phi_ofacorp(weights, corps_i, featureTS, words2tagids):
     """
-    calculate the all factors:Phi of one corp
-    factor Phi means the "Pseudo Probability" of local target variables.
-    :param weights:
-    :param corps_i:
+    Given Theta_k(weights of features), and corp, we can calculate the P(y|x=corp) (y is tag list of x),
+    this is the joint distribution of y conditioned on x = corp. and this distribution is the multiple multiplication of
+     factor 'phi'.
+
+    This method calculate the all factors 'Phi' of a corp.
+    Factor Phi means the "Pseudo Probability" of local target variables.
+    :param weights: the weights of features located in power of exp.please reference the formula of factor 'phi'.
+    :param corps_i: the i_th corp.
     :param featureTS:
-    :param words2tagids:
+    :param words2tagids:the dict : { "word1":[state1,state2,..] , ..}
     :return:
     """
     corp = corps_i[0][1:-1]  # words of a sentence except start and end token<S>.
@@ -114,7 +123,7 @@ def getlog_Phi_of_corp(weights, corps_i, featureTS, words2tagids):
     log_Phi['states_num'] = [np.size(words2tagids[corp[i]]) for i in range(lencorp)]  # [ stateofword1_num,...]
     for i in range(lencorp):
         if i == 0:
-            d = log_Phi['states_num'][0]  # Number of lables of word corp[0]
+            d = log_Phi['states_num'][0]  # Number of labels of word corp[0]
             log_Phi['phi'][i] = np.zeros((1, d))  # the first matrix Phi['phi'] just contains state feature.
             for j in range(d):
                 log_Phi['phi'][i][0, j] = weights[featureTS.index(('S', corp[i], log_Phi['states'][i][j]))]
@@ -135,7 +144,7 @@ def getlog_Phi_of_corp(weights, corps_i, featureTS, words2tagids):
                 except:
                     Tweight = 0.0
                 log_Phi['phi'][i][d1, d2] = Sweight + Tweight
-
+    # calculate normalization coefficient of joint prob distribution of one corp.
     log_z = np.array([[0.0]])
     for i in range(lencorp):
         log_z = logspace.logspacematprod(log_z, log_Phi['phi'][i])
@@ -143,11 +152,13 @@ def getlog_Phi_of_corp(weights, corps_i, featureTS, words2tagids):
     return log_Phi, log_z
 
 
-def getlogAlphaBetalist(log_Phi, lencorp):
+def ForwardBackwardAlg_getlogAlphaBetalist(log_Phi, lencorp):
     """
-    calculate Alpha,Beta list in order to calculate  Marginal probability density of local tardet variables.
-    :param log_Phi:
-    :param lencorp:
+    since each corp has a joint distribution, it has a Alpha,Beta list also.
+    calculate Alpha,Beta list in order to calculate  Marginal probability  of local tardet variables.
+    in fact, this algorithm is called "Forward-backward algorithm"
+    :param log_Phi: factor 'phi' in log space.
+    :param lencorp: the number of words in one corp
     :return:
     """
     log_Alpha = [''] * (lencorp + 1)
@@ -164,6 +175,9 @@ def getlogAlphaBetalist(log_Phi, lencorp):
 
 def getpriorfeatureE(corps, featureTS):
     """
+    When we learn the parameters of conditional prob distribution P(Y|X) (in fact they are weights of features),
+    we need to minimum the negative log_likelihood function of entire training data set.
+    So we need the gradients of likelihood function, it is this gradient that need calculate prior expect of features.
     calculate the experiment_count_of_feature in dataset(many sentences)
     :param corps:
     :param featureTS:
@@ -193,7 +207,8 @@ def getpriorfeatureE(corps, featureTS):
 
 def getpostfeatureE(weights, corps, featureTS, words2tagids):
     """
-    calculate expect counts of feature.
+    The gradients of negative log likelihood function need the return value of this method.
+    this method calculate expect counts of feature.
     in order to calculate gradient of negative log likelihood.
     :param weights:
     :param corps:
@@ -208,8 +223,8 @@ def getpostfeatureE(weights, corps, featureTS, words2tagids):
     for corpidx in range(N):
         corp = corps[corpidx][0][1:-1]  # words of a sentence except start and end token<S>.
         lencorp = np.size(corp)
-        log_Phi, log_z = getlog_Phi_of_corp(weights, corps[corpidx], featureTS, words2tagids)
-        log_Alpha, log_Beta = getlogAlphaBetalist(log_Phi, lencorp)
+        log_Phi, log_z = getlogfactor_Phi_ofacorp(weights, corps[corpidx], featureTS, words2tagids)
+        log_Alpha, log_Beta = ForwardBackwardAlg_getlogAlphaBetalist(log_Phi, lencorp)
 
         for i in range(lencorp):
             state_num_i_pre, state_num_i = np.shape(log_Phi['phi'][i])
@@ -240,15 +255,25 @@ def getpostfeatureE(weights, corps, featureTS, words2tagids):
     return postfeatureE
 
 
-def getnegloglikelihood(weights, corps, featureTS, words2tagids):
+def getnegloglikelihoodvalue(weights, corps, featureTS, words2tagids):
+    """
+    Assume we have the parameters of P(Y|X):weights, we can calculate the negative log likelihood function.
+     Dring this process, each corp(sentence) has one probability P(the_tag_list_of_this_corp|this_corp), and
+      the multiple multiplication of this forms likelihood.
+    :param weights:
+    :param corps:
+    :param featureTS:
+    :param words2tagids:
+    :return:
+    """
     K = np.shape(featureTS)[0]
     N = np.shape(corps)[0]
 
-    neglikilivalue = 0.0
+    negloglikilivalue = 0.0
 
     for corpidx in range(N):
 
-        log_Phi, log_z = getlog_Phi_of_corp(weights, corps[corpidx], featureTS, words2tagids)
+        log_Phi, log_z = getlogfactor_Phi_ofacorp(weights, corps[corpidx], featureTS, words2tagids)
         corp = corps[corpidx][0][1:-1]
         tag = corps[corpidx][1][1:-1]
         lencorp = np.size(corp)
@@ -263,11 +288,41 @@ def getnegloglikelihood(weights, corps, featureTS, words2tagids):
                 P_corp_tilde = logspace.logspacematprod(P_corp_tilde, log_Phi['phi'][i][
                     log_Phi['states'][i - 1].index(tag[i - 1]), log_Phi['states'][i].index(tag[i])])
 
-        neglikilivalue += (log_z - P_corp_tilde) / N
-    return neglikilivalue
+        negloglikilivalue += (log_z - P_corp_tilde) / N
+    return negloglikilivalue
 
 
-def getgradients(priorfeatureE, weights, corps, featureTS, words2tagids):
+def getgradientsofnegloglikelifunc(priorfeatureE, weights, corps, featureTS, words2tagids):
+    """
+    calculate the gradient of negative log likelihood function.
+    :param priorfeatureE:
+    :param weights:
+    :param corps:
+    :param featureTS:
+    :param words2tagids:
+    :return:
+    """
     postfeatureE = getpostfeatureE(weights, corps, featureTS, words2tagids)
-
     return postfeatureE - priorfeatureE
+
+
+def Viterbi(log_Phi, lencorp):
+    """
+
+    :param weights:
+    :param corp:
+    :param featureTS:
+    :param words2tagids:
+    :return:
+    """
+    maxIndexofPreX = [''] * (lencorp)  # max_index[index_of_x_t] =
+    log_Beta = np.zeros((np.shape(log_Phi['phi'][-1])[1], 1))
+    Y_index = [''] * lencorp
+    # log_Alpha forms in line vector, while log_Beta forms in column vector
+    for i in range(lencorp - 1, -1, -1):  # [1,2,...,lencorp]
+        log_Beta, maxIndexofPreX[i] = logspace.logsapceProduct_Max(log_Phi['phi'][i], log_Beta)
+    max_value = log_Beta
+    Y_index[0] = maxIndexofPreX[0]
+    for i in range(1, lencorp):
+        Y_index[i] = maxIndexofPreX[i][int(Y_index[i - 1])]
+    return max_value, Y_index

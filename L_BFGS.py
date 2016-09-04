@@ -16,7 +16,7 @@ def twoloop(s_list, y_list, grad):
 
     m = len(s_list)  # length of memerized s_list and y_list.  
 
-    if np.shape(s_list)[0] >= 1:  # h0 is scale, not matrix.think why.
+    if np.shape(s_list)[0] >= 1:  # h0 is scale(it represents the matrix H_0).think why.
         h0 = 1.0 * np.dot(s_list[-1], y_list[-1]) / np.dot(y_list[-1], y_list[-1])  # init h0.
     else:
         h0 = 1
@@ -56,7 +56,7 @@ def lbfgs(x, corps,
     :return: 
     """
 
-    beta = 0.4  # parameter 'beta' for Backtracking line search method, it control the descent speed of t.
+    beta = 0.2  # parameter 'beta' for Backtracking line search method, it control the descent speed of t.
     alpha = 0.4  # another para in Backtracking line search method.
     epsilon = 1e-4  # stop threshold of optimization
 
@@ -65,18 +65,21 @@ def lbfgs(x, corps,
     while iter < ITER_MAX:
 
         grad = gfun(priorfeatureE, x, corps, featureTS, words2tagids)
+
         if np.linalg.norm(grad) < epsilon:
             break
-        delta_x = -1.0 * twoloop(s, y, grad)
+
+        delta_x = -1.0 * twoloop(s, y, grad)  # descent step
 
         # Backtracking linear search method
-        t = 1.0  # step length
+        t = 1.0  # step length coefficient
         funcvalue = fun(x, corps, featureTS, words2tagids)
+        # backtracking line search is very costly. Because every try of x_new need calculate fun(likelihood) which need
+        # calculate log_Phi again.
         while (fun(x + t * delta_x, corps, featureTS, words2tagids) > funcvalue + alpha * t * np.dot(
                 grad, delta_x)):
             t *= beta
         t *= beta
-
         x_new = x + t * delta_x
 
         sk = x_new - x
@@ -92,4 +95,4 @@ def lbfgs(x, corps,
         iter += 1
         x = x_new
         print 'iterations：%d, func_value：%f' % (iter, funcvalue)
-    return x, fun(x, corps, featureTS, words2tagids)  
+    return x, fun(x, corps, featureTS, words2tagids)
